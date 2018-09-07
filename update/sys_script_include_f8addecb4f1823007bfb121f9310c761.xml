@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <active>true</active>
+        <api_name>x_195647_aws_sts.AwsService</api_name>
+        <client_callable>false</client_callable>
+        <description/>
+        <name>AwsService</name>
+        <script><![CDATA[var AwsService = Class.create();
+
+// There's a useful thread on issues with inheritence of Javascript objects in ServiceNow at
+// https://community.servicenow.com/thread/162144.
+AwsService.prototype = {
+
+    /**
+     * @param service The name of the AWS service
+     * @param region e.g. "us-west-1"
+     * @param credential Properties "identity" and "secret" are required, "session" is required if using temporary credentials.
+     */
+    initialize: function (service, region, credential) {
+        this.service = service;
+        this.host = this.service;
+        if (region) {
+            this.host += "." + region;
+        }
+        this.host += ".amazonaws.com";
+        this.endpoint = "https://" + this.host;
+        this.region = region ? region : "us-east-1";
+        this.credential = credential;
+    },
+
+    /** @return string the time in format yyyymmddThhmmssZ */
+    _iso8601: function () {
+        // toISOString() is not available in Geneva.
+        var d = new Date();
+        if (d["toISOString"] !== undefined) {
+            // "2017-05-15T16:44:55.288Z" --> 20170515T164455Z
+            d = d.toISOString();
+            d = d.replace(/[-:]/g, '');
+            // strip milliseconds.
+            d = d.replace(/\.\d\d\dZ/, 'Z');
+            return d;
+        } else {
+            // "2017-05-15 16:44:55" --> 20170515T164455Z
+            // When run from the global scope `t` is a java.lang.String, when run in an
+            // application scope it's a Javascript string. Force the latter.
+            var t = String(new GlideDateTime().toString());
+            t = t.replace(' ', 'T');
+            t = t.replace(/[-:]/g, '');
+            t += "Z";
+            return t;
+        }
+    },
+
+    _post: function (action, payload, additionalHeaders) {
+        if (!payload) {
+            payload = "";
+        } else if (typeof payload === 'object') {
+            payload = JSON.stringify(payload);
+        }
+        var request = new sn_ws.RESTMessageV2();
+        request.setEndpoint(this.endpoint);
+        request.setHttpMethod("POST");
+        request.setRequestBody(payload);
+
+        var isoDate = this._iso8601();
+        var headers = {
+            "Content-Length": payload.length,
+            "Host": this.host,
+            "X-Amz-Date": isoDate,
+            "X-Amz-User-Agent": "aws-sdk-js/2.7.20"
+        };
+        if (this.credential.session) {
+            headers["X-Amz-Security-Token"] = this.credential.session;
+        }
+
+        var signer = new AwsSignature(this.service, this.region, this.credential, isoDate);
+
+        // Would use Object.assign but it works in neither Geneva nor Helskinki.
+        // Object.extend appears to work from script includes in Geneva+ but not when used in a background script.
+        headers = Object.extend(headers, additionalHeaders);
+        headers["Authorization"] = signer.signV4("POST", headers, "/", undefined, payload);
+        for (var h in headers) {
+            if (headers.hasOwnProperty(h)) {
+                request.setRequestHeader(h, headers[h]);
+            }
+        }
+
+        var response = request.execute();
+        return response;
+    },
+
+    _assertExists: function (val, msg) {
+        if (!val) {
+            throw new Error(msg || "missing value");
+        }
+        return val;
+    },
+
+    type: 'AwsService'
+};
+]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-09-07 00:02:33</sys_created_on>
+        <sys_id>f8addecb4f1823007bfb121f9310c761</sys_id>
+        <sys_mod_count>1</sys_mod_count>
+        <sys_name>AwsService</sys_name>
+        <sys_package display_value="aws_sts_federation" source="x_195647_aws_sts">619473724f1023007bfb121f9310c71d</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="aws_sts_federation">619473724f1023007bfb121f9310c71d</sys_scope>
+        <sys_update_name>sys_script_include_f8addecb4f1823007bfb121f9310c761</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-09-07 00:17:59</sys_updated_on>
+    </sys_script_include>
+</record_update>

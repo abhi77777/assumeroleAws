@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <active>true</active>
+        <api_name>x_195647_aws_sts.AwsSecurityTokenService</api_name>
+        <client_callable>false</client_callable>
+        <description/>
+        <name>AwsSecurityTokenService</name>
+        <script><![CDATA[var AwsSecurityTokenService = Class.create();
+
+AwsSecurityTokenService.prototype = Object.extend(new AwsService(), {
+
+    initialize: function (credential) {
+        AwsService.prototype.initialize.call(this, "sts", null, credential);
+        this.AWSVersionParam = "Version=2011-06-15";
+    },
+
+    /**
+     * Args:
+     *    roleArn: The Amazon Resource Name (ARN) of the role to assume.
+     *    roleSessionName: An identifier for the assumed role session. Use the role session name to uniquely
+     *       identify a session when the same role is assumed by different principals or for different reasons.
+     *    options: optional object with additional optional parameters for the request. This can include:
+     *      durationSeconds:  Optional. The duration, in seconds, of the role session. The value can range from 900
+     *         seconds (15 minutes) to 3600 seconds (1 hour). By default, the value is set to 3600 seconds.
+     *      externalId: Optional. A unique identifier that is used by third parties when assuming roles in their
+     *        customers' accounts.
+
+     *  Response object has fields:
+     *     AssumedRoleUser: The Amazon Resource Name (ARN) and the assumed role ID, which are identifiers
+     *       that you can use to refer to the resulting temporary security credentials. Type: AssumedRoleUser object
+     *    Credentials : The temporary security credentials, which include an access key ID, a secret access key, and
+     *       a security (or session) token. Type: Credentials object
+     *    PackedPolicySize A percentage value that indicates the size of the policy in packed form. The service
+     *       rejects any policy with a packed size greater than 100 percent, which means the policy exceeded the
+     *       allowed space. Type: Integer
+     */
+    assumeRole: function(roleArn, roleSessionName, options) {
+        this._assertExists(roleArn, "roleArn");
+        this._assertExists(roleSessionName, "roleSessionName");
+        var params = {
+            RoleArn: roleArn,
+            RoleSessionName: roleSessionName
+        };
+        if (options) {
+            var name;
+            for (name in options) {
+                if (options.hasOwnProperty(name)) {
+                    params[name] = options[name];
+                }
+            }
+        }
+        var action = "AssumeRole";
+        var payload = this._toFormData(action, params);
+        var response = this._post(action, payload, {
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "Accept": "application/json"
+        });
+        // Response body looks like:
+        // {
+        //     "AssumeRoleResponse": {
+        //         "AssumeRoleResult": {
+        //             "AssumedRoleUser": {
+        //                 "Arn": "arn:aws:sts::304295633295:assumed-role/ServiceNowCustomer/6816f79cc0a8016401c5a33be04be441",
+        //                 "AssumedRoleId": "AROAIQ2CK6IALJGYJRI66:6816f79cc0a8016401c5a33be04be441"
+        //             },
+        //             "Credentials": {
+        //                 "AccessKeyId": "ASIAJJPHHG4RTBJ7XKXA",
+        //                 "Expiration": 1498064330,
+        //                 "SecretAccessKey": "u+LlhGPVRy946VJUd/xkMCPFsakQebHmJdNZ7h37",
+        //                 "SessionToken": "AgoGb3JpZ2luEFQaCXVzLXdlc3QtMiKAAn2X5Nm1GPvPMde4knbWlFEzAQZiW5BoHof9aDz2pd645J4vQJla2Fu4JJmWmHuJk3JKSM6E+LaWxotRcNs05w9/cE5cTy4PAcAjvdWt1lCXACOljXHz4T07ijNp72RiVA9x+UQ7HsdMcbV7dQeoHzAujk4zRYyNpuKwqg3fKJhKlaMw8N6tgCVG6zg98T92FSkjEFJw8/u5xzWi3Eu27vW79QNTCR6fDE94QASQ3VnE8Ma5ihG/dMnSOgmK1MPR+noliu3Tq1sbunpys5UmDXlhO/NLXwC6hQ3dGQtRuxOZgUQCXe+CKkVFL0spFUVZUBE8YV8qMyUDBcTKdvKDWRcqjwIIqf//////////ARAAGgwzMDQyOTU2MzMyOTUiDKgmlfsPLCSQyB1KXCrjAU+UwyhNXG8eNUu+KX9bJsbacMSpw/Ee/SFRQRaE0ktTKslFNO9j86wDnMzGs3tIQziD9dqx/6038gh1ri9Jyl7RgI8uiAAMnSWnNNn3BnrvxU9DgIkTvoUTCEN6x28ur0jkhY3B8Q+mHyZFxH+zFDFdB01DcQDhyWTg6n8psvHjf0nOiR3veScB5k1qpjxAGYJ8aLMRd2QrZYA2enlIMxFpW5xfoIumYoPY9RPHcehZHLY/6lHBf6rk480IizfNWjsuRRRivbvCNqcZ59/8RdzVlTUws2UvoySFYifSKs3JAWT8MLqvqsoF"
+        //             },
+        //             "PackedPolicySize": null
+        //         },
+        //         "ResponseMetadata": {
+        //             "RequestId": "844165e0-569a-11e7-95bf-f1d5416a21cb"
+        //         }
+        //     }
+        // };
+        var responseObject = JSON.parse(response.getBody());
+        if (responseObject.Error) {
+            var details = responseObject.Error.Code + ": " + responseObject.Error.Message;
+            throw new Error("assumeRole: " + details);
+        }
+        return responseObject["AssumeRoleResponse"]["AssumeRoleResult"];
+    },
+
+    _toFormData: function (action, contents) {
+        var formBody = "Action=" + action;
+        var name;
+        for (name in contents) {
+            if (contents.hasOwnProperty(name)) {
+                formBody = formBody + "&" + encodeURIComponent(name) + "=" + encodeURIComponent(contents[name]);
+            }
+        }
+        return formBody + "&" + this.AWSVersionParam;
+    },
+
+    type: 'AwsSecurityTokenService'
+
+});]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-09-07 00:03:53</sys_created_on>
+        <sys_id>f8fddecb4f1823007bfb121f9310c76e</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>AwsSecurityTokenService</sys_name>
+        <sys_package display_value="aws_sts_federation" source="x_195647_aws_sts">619473724f1023007bfb121f9310c71d</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="aws_sts_federation">619473724f1023007bfb121f9310c71d</sys_scope>
+        <sys_update_name>sys_script_include_f8fddecb4f1823007bfb121f9310c76e</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-09-07 00:03:53</sys_updated_on>
+    </sys_script_include>
+</record_update>

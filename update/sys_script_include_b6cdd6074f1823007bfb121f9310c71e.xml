@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<record_update table="sys_script_include">
+    <sys_script_include action="INSERT_OR_UPDATE">
+        <access>package_private</access>
+        <active>true</active>
+        <api_name>x_195647_aws_sts.AwsSignature</api_name>
+        <client_callable>false</client_callable>
+        <description/>
+        <name>AwsSignature</name>
+        <script><![CDATA[var AwsSignature = Class.create();
+
+AwsSignature.prototype = {
+    /**
+     * @param service The name of the AWS service
+     * @param region e.g. "us-west-1"
+     * @param credential Properties "identity" and "secret" are required, "session" is required if using temporary credentials.
+     * @param isoDate The date in ISO 8601 format.
+     */
+    initialize: function (service, region, credential, isoDate) {
+        this.crypto = CryptoJS;
+        this.service = service;
+        this.region = region ? region : "us-east-1";
+        this.credential = credential;
+        this.isoDate = isoDate;
+        this.date = isoDate.substring(0, 8);
+        this.credentialScope = this.date + "/" + this.region + "/" + this.service + "/aws4_request";
+    },
+
+    signV4: function (method, headers, path, query, payload) {
+        var cr = this._createCanonicalRequest(method, headers, path, query, payload);
+        var hashedCanonicalRequest = this._hashCanonicalRequest(cr.canonicalRequest);
+        var stringToSign = this._createStringToSign(hashedCanonicalRequest);
+        var signature = this._calculateSignature(stringToSign);
+        return this._getAuthorizationHeader(cr.signedHeaders, signature);
+    },
+
+    _createCanonicalRequest: function (method, headers, path, query, payload) {
+        // STAGE 0: Prepare headers.
+        // Copy headers into a new object.
+        headers = Object.extend({}, headers);
+
+        // Object.keys unavailable in Geneva.
+        var headerKeys = [];
+        for (var h in headers) {
+            if (headers.hasOwnProperty(h)) {
+                var val = headers[h];
+                var lc = h.toLowerCase();
+                headerKeys.push(lc);
+                delete headers[h];
+                headers[lc] = val;
+            }
+        }
+        headerKeys.sort();
+        var headerValues = [];
+        for (var i = 0, l = headerKeys.length; i < l; i++) {
+            var header = headerKeys[i];
+            headerValues[i] = headers[header];
+        }
+
+        // STAGE 1: create the canonical request
+        /*
+         CanonicalRequest =
+         HTTPRequestMethod + '\n' +
+         CanonicalURI + '\n' +
+         CanonicalQueryString + '\n' +
+         CanonicalHeaders + '\n' +
+         SignedHeaders + '\n' +
+         HexEncode(Hash(RequestPayload))
+         */
+        var canonicalRequest = method + "\n";
+        canonicalRequest += encodeURI(this._normalize(path)) + "\n";
+        if (query) {
+            // TODO Include CanonicalQueryString.
+            canonicalRequest += "\n";
+        } else {
+            canonicalRequest += "\n";
+        }
+
+        // Add the canonical headers, followed by a newline character.
+        var canonicalHeaders = "";
+        for (var i = 0; i < headerKeys.length; i++) {
+            var value = headerValues[i];
+            if (typeof value === "string") {
+                // remove trailing spaces and sequential spaces within the rest of the string.
+                value = value.trim();
+                value = value.replace(/ +/g, ' ');
+            }
+            canonicalHeaders += headerKeys[i] + ":" + value + "\n";
+        }
+        canonicalRequest += canonicalHeaders + "\n";
+
+        // Add the signed headers, followed by a newline character.
+        var signedHeaders = "";
+        for (var i = 0; i < headerKeys.length; i++) {
+            signedHeaders += headerKeys[i].toLowerCase();
+            if (i < headerKeys.length - 1) {
+                signedHeaders += ";";
+            }
+        }
+        canonicalRequest += signedHeaders + "\n";
+        canonicalRequest += this.crypto.SHA256(payload).toString();
+
+        return {
+            canonicalRequest: canonicalRequest,
+            signedHeaders: signedHeaders
+        };
+    },
+
+    _hashCanonicalRequest: function(canonicalRequest) {
+        return this.crypto.SHA256(canonicalRequest).toString();
+    },
+
+    _createStringToSign: function (hashedCanonicalRequest) {
+        // STAGE 2: create a string to sign
+        /*
+         StringToSign =
+         Algorithm + \n +
+         RequestDateTime + \n +
+         CredentialScope + \n +
+         HashedCanonicalRequest
+         */
+        var stringToSign = "";
+        var algorithm = "AWS4-HMAC-SHA256";
+        stringToSign += algorithm + "\n";
+        stringToSign += this.isoDate + "\n";
+        stringToSign += this.credentialScope + "\n";
+        stringToSign += hashedCanonicalRequest;
+        return stringToSign;
+    },
+
+    _calculateSignature: function (stringToSign) {
+        // STAGE 3: calculate a signature
+        // Derive the signing key.
+        function getSignatureKey(Crypto, key, dateStamp, regionName, serviceName) {
+            var kDate = Crypto.HmacSHA256(dateStamp, "AWS4" + key);
+            var kRegion = Crypto.HmacSHA256(regionName, kDate);
+            var kService = Crypto.HmacSHA256(serviceName, kRegion);
+            var kSigning = Crypto.HmacSHA256("aws4_request", kService);
+            return kSigning;
+        }
+
+        // Service Now errors if you assign the result of getSignatureKey to interim variable!
+        return this.crypto.HmacSHA256(stringToSign,
+            getSignatureKey(this.crypto, this.credential.secret, this.date, this.region, this.service)).toString();
+    },
+
+    _getAuthorizationHeader: function(signedHeaders, signature) {
+        // STAGE 4: add an authorization header
+        // Authorization: algorithm Credential=access key ID/credential scope, SignedHeaders=SignedHeaders, Signature=signature
+        return "AWS4-HMAC-SHA256 Credential=" + this.credential.identity + "/" + this.credentialScope +
+                    ", SignedHeaders=" + signedHeaders + ", Signature=" + signature;
+    },
+
+    /** Normalize a URL */
+    _normalize: function (path) {
+        // see https://tools.ietf.org/html/rfc3986#section-5.2.4.
+        // Uses an index into path rather than deletions from the start of the string.
+        // Replace successive slashes with a single slash.
+        path = path.replace(/\/\/+|\/\.\//g, '/');
+        var output = '';
+        var index = 0;
+        while (index < path.length) {
+            // A
+            if (path.startsWith('./', index)) {
+                index += 2;
+            } else if (path.startsWith('../', index)) {
+                index += 3;
+            }
+            // B
+            else if (path.startsWith('/./', index)) {
+                index += 2;
+            } else if (path.startsWith('/.', index) && (index + 2 === path.length)) {
+                output += '/';
+                index += 2;
+            }
+            // C
+            else if (path.startsWith('/../', index)) {
+                index += 3;
+                output = output.substring(0, output.lastIndexOf('/'));
+            } else if (path.startsWith('/..', index) && (index + 3 === path.length)) {
+                output = output.substring(0, output.lastIndexOf('/'));
+                output += '/';
+                index += 3;
+            }
+            // D
+            else if (path.substring(index) === '.' || path.substring(index) === '..') {
+                index = path.length;
+            }
+            // E
+            else {
+                output += path.charAt(index++);
+                while (index < path.length && path.charAt(index) !== '/') {
+                    output += path.charAt(index++);
+                }
+            }
+        }
+        return output;
+    }
+
+};]]></script>
+        <sys_class_name>sys_script_include</sys_class_name>
+        <sys_created_by>admin</sys_created_by>
+        <sys_created_on>2018-09-07 00:03:18</sys_created_on>
+        <sys_id>b6cdd6074f1823007bfb121f9310c71e</sys_id>
+        <sys_mod_count>0</sys_mod_count>
+        <sys_name>AwsSignature</sys_name>
+        <sys_package display_value="aws_sts_federation" source="x_195647_aws_sts">619473724f1023007bfb121f9310c71d</sys_package>
+        <sys_policy>read</sys_policy>
+        <sys_scope display_value="aws_sts_federation">619473724f1023007bfb121f9310c71d</sys_scope>
+        <sys_update_name>sys_script_include_b6cdd6074f1823007bfb121f9310c71e</sys_update_name>
+        <sys_updated_by>admin</sys_updated_by>
+        <sys_updated_on>2018-09-07 00:03:18</sys_updated_on>
+    </sys_script_include>
+</record_update>
